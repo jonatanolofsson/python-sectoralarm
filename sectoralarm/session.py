@@ -2,16 +2,17 @@
 Sector Alarm session, using Sector Alarm app api
 '''
 
-import json
-import requests
 from datetime import datetime
+import json
+import aiohttp
+from asyncinit import asyncinit
 from . import urls
 
 
-def _validate_response(response):
+async def _validate_response(response):
     """ Verify that response is OK """
-    if response.status_code == 200:
-        return
+    if response.status == 200:
+        return await response.json()
     raise ResponseError(response.status_code, response.text)
 
 
@@ -60,7 +61,8 @@ class ResponseError(Error):
         self.text = json.loads(text)
 
 
-class Session(object):
+@asyncinit
+class Session:
     """ Sector Alarm app session
 
     Args:
@@ -69,83 +71,64 @@ class Session(object):
 
     """
 
-    def __init__(self, username, password, panel):
+    async def __init__(self, username, password, panel):
         self._username = username
         self._password = password
         self._panel = panel
+        self.session = await aiohttp.ClientSession().__aenter__()
 
-    def get_arm_state(self):
+    async def get_arm_state(self):
         """ Get arm state """
         response = None
-        try:
-            response = requests.get(
-                urls.status(self._username, self._password, self._panel))
-        except requests.exceptions.RequestException as ex:
-            raise RequestError(ex)
-        _validate_response(response)
-        res = json.loads(response.text)
+        response = await self.session.get(
+            urls.status(self._username, self._password, self._panel))
+        res = await _validate_response(response)
         res['timeex'] = fix_date_short(res['timeex'])
         return res
 
-    def get_temperature(self, device_label=None):
+    async def get_temperature(self, device_label=None):
         """ Get temperatures """
         response = None
-        try:
-            response = requests.get(urls.get_temperature(
-                self._username, self._password, self._panel))
-        except requests.exceptions.RequestException as ex:
-            raise RequestError(ex)
-        _validate_response(response)
-        res = json.loads(response.text)
+        response = await self.session.get(urls.get_temperature(
+            self._username, self._password, self._panel))
+        res = await _validate_response(response)
         if device_label is not None:
             res['temperatureComponentList'] = [
                 i for i in res['temperatureComponentList']
                 if i['serialNo'] == device_label]
         return res
 
-    def get_ethernet_status(self):
+    async def get_ethernet_status(self):
         """ Get ethernet state """
         response = None
-        try:
-            response = requests.get(urls.get_ethernet_status(
-                self._username,
-                self._password,
-                self._panel))
-        except requests.exceptions.RequestException as ex:
-            raise RequestError(ex)
-        _validate_response(response)
-        res = json.loads(response.text)
+        response = await self.session.get(urls.get_ethernet_status(
+            self._username,
+            self._password,
+            self._panel))
+        res = await _validate_response(response)
         return res
 
-    def get_lock_devices(self):
+    async def get_lock_devices(self):
         """ Get lock devices """
         response = None
-        try:
-            response = requests.get(urls.get_doorlock_devices(
-                self._username,
-                self._password,
-                self._panel))
-        except requests.exceptions.RequestException as ex:
-            raise RequestError(ex)
-        _validate_response(response)
-        res = json.loads(response.text)
+        response = await self.session.get(urls.get_doorlock_devices(
+            self._username,
+            self._password,
+            self._panel))
+        res = await _validate_response(response)
         return res
 
-    def get_lock_status(self):
+    async def get_lock_status(self):
         """ Get lock state """
         response = None
-        try:
-            response = requests.get(urls.get_doorlock_status(
-                self._username,
-                self._password,
-                self._panel))
-        except requests.exceptions.RequestException as ex:
-            raise RequestError(ex)
-        _validate_response(response)
-        res = json.loads(response.text)
+        response = await self.session.get(urls.get_doorlock_status(
+            self._username,
+            self._password,
+            self._panel))
+        res = await _validate_response(response)
         return res
 
-    def set_arm_state(self, code, state):
+    async def set_arm_state(self, code, state):
         """ Set alarm state
 
         Args:
@@ -153,37 +136,30 @@ class Session(object):
             state (str): 'ARMED_HOME', 'ARMED_AWAY' or 'DISARMED'
         """
         response = None
-        try:
-            response = requests.put(
-                urls.set_armstate(self._giid),
-                headers={
-                    'Accept': 'application/json, text/javascript, */*; q=0.01',
-                    'Content-Type': 'application/json',
-                    'Cookie': 'vid={}'.format(self._vid)},
-                data=json.dumps({"code": str(code), "state": state}))
-        except requests.exceptions.RequestException as ex:
-            raise RequestError(ex)
-        _validate_response(response)
-        return json.loads(response.text)
+        response = await self.session.put(
+            urls.set_armstate(self._giid),
+            headers={
+                'Accept': 'application/json, text/javascript, */*; q=0.01',
+                'Content-Type': 'application/json',
+                'Cookie': 'vid={}'.format(self._vid)},
+            data=json.dumps({"code": str(code), "state": state}))
+        res = await _validate_response(response)
+        return res
 
-    def get_history(self, offset=0):
+    async def get_history(self, offset=0):
         """ Get recent events
         """
         response = None
-        try:
-            response = requests.get(
-                urls.history(self._username, self._password, self._panel),
-                params={
-                    "startIndex": int(offset)})
-        except requests.exceptions.RequestException as ex:
-            raise RequestError(ex)
-        _validate_response(response)
-        res = json.loads(response.text)
+        response = await self.session.get(
+            urls.history(self._username, self._password, self._panel),
+            params={
+                "startIndex": int(offset)})
+        res = await _validate_response(response)
         for row in res['logs']:
             row['time'] = fix_date_short(row['time'])
         return res
 
-    def lock_doorlock(self, serialNo, code):
+    async def lock_doorlock(self, serialNo, code):
         """ Lock
 
         Args:
@@ -191,19 +167,16 @@ class Session(object):
             code (str): Lock code
         """
         response = None
-        try:
-            response = requests.get(urls.lock_doorlock(
-                self._username,
-                self._password,
-                self._panel,
-                serialNo,
-                code))
-        except requests.exceptions.RequestException as ex:
-            raise RequestError(ex)
-        _validate_response(response)
-        return json.loads(response.text)
+        response = await self.session.get(urls.lock_doorlock(
+            self._username,
+            self._password,
+            self._panel,
+            serialNo,
+            code))
+        res = await _validate_response(response)
+        return res
 
-    def unlock_doorlock(self, serialNo, code):
+    async def unlock_doorlock(self, serialNo, code):
         """ Lock
 
         Args:
@@ -211,44 +184,35 @@ class Session(object):
             code (str): Lock code
         """
         response = None
-        try:
-            response = requests.get(urls.unlock_doorlock(
-                self._username,
-                self._password,
-                self._panel,
-                serialNo,
-                code))
-        except requests.exceptions.RequestException as ex:
-            raise RequestError(ex)
-        _validate_response(response)
-        return json.loads(response.text)
+        response = await self.session.get(urls.unlock_doorlock(
+            self._username,
+            self._password,
+            self._panel,
+            serialNo,
+            code))
+        res = await _validate_response(response)
+        return res
 
-    def get_lock_config(self, device_label):
+    async def get_lock_config(self, device_label):
         """ Get lock configuration
 
         Args:
             device_label (str): device label of lock
         """
         response = None
-        try:
-            response = requests.get(
-                urls.lockconfig(self._giid, device_label),
-                headers={
-                    'Accept': 'application/json, text/javascript, */*; q=0.01',
-                    'Cookie': 'vid={}'.format(self._vid)})
-        except requests.exceptions.RequestException as ex:
-            raise RequestError(ex)
-        _validate_response(response)
-        return json.loads(response.text)
+        response = await self.session.get(
+            urls.lockconfig(self._giid, device_label),
+            headers={
+                'Accept': 'application/json, text/javascript, */*; q=0.01',
+                'Cookie': 'vid={}'.format(self._vid)})
+        res = await _validate_response(response)
+        return res
 
-    def logout(self):
+    async def logout(self):
         """ Logout and remove vid """
         response = None
-        try:
-            response = requests.delete(
-                urls.login(),
-                headers={
-                    'Cookie': 'vid={}'.format(self._vid)})
-        except requests.exceptions.RequestException as ex:
-            raise RequestError(ex)
-        _validate_response(response)
+        response = await self.session.delete(
+            urls.login(),
+            headers={
+                'Cookie': 'vid={}'.format(self._vid)})
+        await _validate_response(response)
